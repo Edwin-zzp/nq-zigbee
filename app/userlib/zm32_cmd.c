@@ -15,6 +15,7 @@ const uint8_t ZM32_MAC_COORDINATOR[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x0
 #define ZM32_FRAME_MAX_TOTAL_MULTICAST                                          \
   (3u + 1u + 2u + 2u + ZM32_FRAME_TX_MAX_PAYLOAD_MULTICAST + 1u + 1u)
 
+// 计算 ZM32 帧的逐字节累加校验值
 static uint8_t zm32_frame_checksum(const uint8_t *buf, uint16_t len) {
   uint32_t sum = 0;
   for (uint16_t i = 0; i < len; ++i)
@@ -22,6 +23,7 @@ static uint8_t zm32_frame_checksum(const uint8_t *buf, uint16_t len) {
   return (uint8_t)(sum & 0xFFu);
 }
 
+// 描述不同命令协议头格式及结束方式的表项
 typedef struct {
   uint8_t header[3];
   uint8_t header_len;
@@ -44,6 +46,7 @@ static bool zm32_frame_validate_header(const uint8_t *frame, uint16_t frame_len)
          frame[2] == ZM32_FRAME_HEADER2;
 }
 
+// 发送临时/永久配置命令帧，payload 根据描述符自动拼接
 static void zm32_send_frame(const zm32_proto_desc_t *proto, uint8_t cmd,
                             const uint8_t *payload, uint16_t payload_len) {
   if (!proto)
@@ -73,6 +76,7 @@ static void zm32_send_frame(const zm32_proto_desc_t *proto, uint8_t cmd,
     usart2_tx_write_blocking(frame, pos);
 }
 
+// 阻塞等待响应帧，支持按协议头对齐及空闲间隔判定帧结束
 static bool zm32_wait_frame(const zm32_proto_desc_t *proto, uint8_t cmd,
                             uint8_t *out, uint16_t *io_len, uint16_t min_len,
                             bool min_is_exact, uint32_t timeout_ms) {

@@ -12,6 +12,7 @@ typedef enum {
   REPORT_STATE_WAIT_ACK,
 } report_state_t;
 
+// 上报逻辑的运行时上下文
 typedef struct {
   uint8_t sensor_id[6];
   uint32_t elapsed_s;
@@ -25,6 +26,7 @@ typedef struct {
 
 static report_ctx_t s_report_ctx;
 
+// 组合状态字节，按照协议的各个位设置运行标志
 static void build_status_payload(uint8_t *out) {
   uint8_t status = 0;
   if (g_dev_rt.phase == DEV_PHASE_WORK)
@@ -54,6 +56,7 @@ static void build_le32(uint8_t out[4], uint32_t v) {
   out[3] = (uint8_t)((v >> 24) & 0xFF);
 }
 
+// 构造监测数据帧并立即发送
 static void send_monitor_report(void) {
   uint8_t status_payload[1];
   uint8_t freq_payload[2];
@@ -134,6 +137,7 @@ void report_manager_tick_ms(uint16_t delta_ms) {
     s_report_ctx.state = REPORT_STATE_IDLE;
     s_report_ctx.wait_ms = 0;
     s_report_ctx.error_count++;
+    // 超时视为一次通信失败，累积错误次数供恢复逻辑判定
     printf("[REPORT] monitor ack timeout (err=%lu)\r\n",
            (unsigned long)s_report_ctx.error_count);
   }
@@ -176,6 +180,7 @@ void report_manager_on_monitor_ack(const proto_frame_t *frame) {
 
   if (frame->cmd_status != 0xFF) {
     s_report_ctx.error_count++;
+    // 主站返回失败状态，同样计入错误次数
     printf("[REPORT] monitor ack error status=0x%02X (err=%lu)\r\n",
            frame->cmd_status, (unsigned long)s_report_ctx.error_count);
   } else {

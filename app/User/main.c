@@ -36,6 +36,7 @@
 #define REPORT_ERROR_RECOVERY_THRESHOLD 5u
 #define ZM32_REJOIN_DELAY_MS 2000u
 #define ZM32_POST_RESTORE_DELAY_MS 500u
+// ZM32 模块上电后需要的自检时间，避免冷启动读取失败
 #define ZM32_BOOT_READY_DELAY_MS 1500u
 
 /* Global Variable */
@@ -64,6 +65,7 @@ static void print_mac_line(const char *prefix, const uint8_t mac[8]) {
          mac[1], mac[2], mac[3], mac[4], mac[5], mac[6], mac[7]);
 }
 
+// 配置 ZM32 的临时通信参数，确保后续透传设置一致
 static void configure_zm32_defaults(void) {
   uint8_t status = 0xFF;
   uint8_t ack_mac[8];
@@ -104,6 +106,7 @@ static void configure_zm32_defaults(void) {
   zm32_cmd_flush_rx();
 }
 
+// 读取 ZM32 的基础信息并缓存，便于恢复流程使用
 static bool fetch_zm32_info(void) {
   zm32_dev_info_t info;
   if (!zm32_cmd_read_local_info(&info)) {
@@ -120,6 +123,7 @@ static bool fetch_zm32_info(void) {
   return true;
 }
 
+// 写入新的 PAN ID 并触发模块复位，tag 用于区分日志前缀
 static bool zm32_apply_pan_and_reset(uint16_t pan_id, const char *tag) {
   if (!g_zm32_info_valid)
     return false;
@@ -145,6 +149,7 @@ static bool zm32_apply_pan_and_reset(uint16_t pan_id, const char *tag) {
   return true;
 }
 
+// 当监测上报连续失败时执行重新入网恢复流程
 static void perform_zm32_recovery(void) {
   if (g_recovery_in_progress)
     return;
@@ -184,6 +189,7 @@ static void perform_zm32_recovery(void) {
   g_recovery_in_progress = false;
 }
 
+// 根据错误累计情况触发恢复流程，避免频繁重复执行
 static void handle_report_errors(void) {
   uint32_t err = report_manager_get_error_count();
   if (err < REPORT_ERROR_RECOVERY_THRESHOLD)
@@ -815,6 +821,7 @@ int main(void) {
   timer_init();                             // 定时器初始化
 
   printf("[ZM32] wait %u ms for module boot...\r\n", ZM32_BOOT_READY_DELAY_MS);
+  // 预留时间给 ZM32 完成上电初始化，避免后续命令超时
   Delay_Ms(ZM32_BOOT_READY_DELAY_MS);
 
   configure_zm32_defaults();
