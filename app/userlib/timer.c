@@ -2,6 +2,7 @@
 #include "ch32v20x_tim.h" // 根据你的芯片型号选择对应的头文件
 #include "device_hw.h"
 #include "device_logic.h"
+#include "report_manager.h"
 
 extern device_config_t g_dev_cfg; // 声明外部变量
 extern device_runtime_t g_dev_rt; // 声明外部变量
@@ -61,6 +62,7 @@ void TIM3_IRQHandler(void) {
     // printf("timer 1s interrupt");
     // 每秒中断，处理工作状态切换
     device_logic_tick_1s(&g_dev_cfg, &g_dev_rt); // 设备工作状态切换
+    report_manager_tick_1s();
   }
 }
 
@@ -70,6 +72,7 @@ void TIM2_IRQHandler(void) {
     // printf("timer 10ms interrupt");
     // 每 10ms 中断，处理 LED 闪烁和 PWM 控制
     device_logic_tick_ms(&g_dev_cfg, &g_dev_rt, 10); // 更新 LED 状态
+    report_manager_tick_ms(10);
     device_hw_apply(&g_dev_cfg, &g_dev_rt);          // 应用硬件状态
   }
 }

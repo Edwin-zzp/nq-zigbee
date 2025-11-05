@@ -23,7 +23,9 @@
 #include "device_logic.h" // ★ 新增：设备逻辑层
 #include "proto.h"
 #include "timer.h"
+#include "report_manager.h"
 #include "usart2_dma.h"
+#include <string.h>
 
 /* Global typedef */
 
@@ -40,7 +42,45 @@ device_config_t g_dev_cfg;
 device_runtime_t g_dev_rt;
 
 // 本机 SensorID（规范里的 SensorID），这里写死一份示例值，后面按实际烧录ID改
-static const uint8_t kLocalSensorID[6] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB};
+static uint8_t g_sensor_id[6] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB};
+
+static void send_control_status_ack(uint8_t status) {
+  uint8_t frame[16];
+  size_t frame_len =
+      proto_build_control_status_ack(g_sensor_id, status, frame, sizeof(frame));
+  if (!frame_len)
+    return;
+  usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+  printf("[CTRL-ACK-CS] tx status=0x%02X\r\n", status);
+}
+
+static void send_control_id_ack(uint8_t req_set, const uint8_t id_payload[6]) {
+  uint8_t frame[24];
+  size_t frame_len = proto_build_control_id_ack(g_sensor_id, CTRL_ID_QS, req_set,
+                                                id_payload, frame,
+                                                sizeof(frame));
+  if (!frame_len)
+    return;
+  usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+  printf("[CTRL-ACK-ID-TX] rs=%u id=%02X%02X%02X%02X%02X%02X\r\n", req_set,
+         id_payload[0], id_payload[1], id_payload[2], id_payload[3],
+         id_payload[4], id_payload[5]);
+}
+
+static void apply_sensor_id(const uint8_t new_id[6]) {
+  if (!new_id)
+    return;
+
+  if (memcmp(g_sensor_id, new_id, sizeof(g_sensor_id)) == 0)
+    return;
+
+  memcpy(g_sensor_id, new_id, sizeof(g_sensor_id));
+  proto_set_local_id(&g_proto, g_sensor_id);
+  report_manager_set_sensor_id(g_sensor_id);
+  printf("[SENSOR-ID] updated to %02X%02X%02X%02X%02X%02X\r\n", g_sensor_id[0],
+         g_sensor_id[1], g_sensor_id[2], g_sensor_id[3], g_sensor_id[4],
+         g_sensor_id[5]);
+}
 
 /* ====== LED：默认 PC13（可按板子改） ====== */
 #define LED_GPIO GPIOB
@@ -66,7 +106,7 @@ static void on_monitor(proto_ctx_t *ctx, const proto_frame_t *f) {
   int m = snprintf(msg, sizeof(msg), "[MON] params=%u raw=%uB\r\n",
                    f->param_cnt, f->raw_len);
   if (m > 0)
-    printf(msg);
+    printf("%s", msg);
 
   // 这里可以按 f->params[i].dtype / len / val[] 去解析具体业务参数
 }
@@ -74,11 +114,12 @@ static void on_monitor_ack(proto_ctx_t *ctx, const proto_frame_t *f) {
   (void)ctx;
   if (!f->has_cmd_status)
     return;
+  report_manager_on_monitor_ack(f);
   char msg[64];
   int m =
       snprintf(msg, sizeof(msg), "[MON-ACK] status=0x%02X\r\n", f->cmd_status);
   if (m > 0)
-    printf(msg);
+    printf("%s", msg);
 }
 // 100 控制请求（如果本机是“终端+从机”，一般用不到，从机更多处理 100→101）
 static void on_control(proto_ctx_t *ctx, const proto_frame_t *f) {
@@ -88,7 +129,27 @@ static void on_control(proto_ctx_t *ctx, const proto_frame_t *f) {
                    "[CTRL] type=0x%02X rs=%u param_cnt=%u has_id=%u\r\n",
                    f->ctrl_type, f->req_set, f->param_cnt, f->has_id_payload);
   if (m > 0)
-    printf(msg);
+    printf("%s", msg);
+
+  if (f->ctrl_type == CTRL_REQ_MONITOR) {
+    uint8_t status = (f->req_set == 0) ? 0xFF : 0x00;
+    send_control_status_ack(status);
+    if (status == 0xFF) {
+      report_manager_request_immediate();
+    }
+  } else if (f->ctrl_type == CTRL_ID_QS) {
+    if (f->req_set == 0) {
+      send_control_id_ack(f->req_set, g_sensor_id);
+    } else {
+      if (!f->has_id_payload) {
+        printf("[CTRL-ID] missing payload for set request\r\n");
+        send_control_status_ack(0x00);
+        return;
+      }
+      apply_sensor_id(f->id_payload);
+      send_control_id_ack(f->req_set, g_sensor_id);
+    }
+  }
 }
 // 101 控制响应
 static void on_control_ack(proto_ctx_t *ctx, const proto_frame_t *f) {
@@ -103,19 +164,19 @@ static void on_control_ack(proto_ctx_t *ctx, const proto_frame_t *f) {
         f->ctrl_type, f->req_set, f->id_payload[0], f->id_payload[1],
         f->id_payload[2], f->id_payload[3], f->id_payload[4], f->id_payload[5]);
     if (m > 0)
-      printf(msg);
+      printf("%s", msg);
   } else if (f->has_cmd_status && f->param_cnt == 0) {
     // 仅状态的响应（例如“请求监测数据”的应答）
     int m = snprintf(msg, sizeof(msg), "[CTRL-ACK-CS] status=0x%02X\r\n",
                      f->cmd_status);
     if (m > 0)
-      printf(msg);
+      printf("%s", msg);
   } else {
     // 参数 / 输出 查询/设置 的响应（ParameterList）
     int m = snprintf(msg, sizeof(msg), "[CTRL-ACK] param_cnt=%u raw_len=%u\r\n",
                      f->param_cnt, f->raw_len);
     if (m > 0)
-      printf(msg);
+      printf("%s", msg);
   }
 
   // 这里同样可以按 f->params[i].dtype / len / val[] 做业务处理
@@ -145,7 +206,8 @@ int main(void) {
   // ★ 设置本机 SensorID（规范中的 SensorID）
   //   后续 proto_feed() 解析的每一帧，会先比对帧头里的 SensorID 与这里的值：
   //   如果不一致，则 f->dropped_by_id=1，且不会进入任何回调，相当于“废弃帧”。
-  proto_set_local_id(&g_proto, kLocalSensorID);
+  proto_set_local_id(&g_proto, g_sensor_id);
+  report_manager_init(g_sensor_id);
 
   g_proto.on_monitor = on_monitor;
   g_proto.on_monitor_ack = on_monitor_ack;
@@ -176,5 +238,6 @@ int main(void) {
        // 喂给解析器（内部可一次解析多帧）
        proto_feed(&g_proto, g_rx_chunk, n);
      }
+     report_manager_process();
   }
 }
