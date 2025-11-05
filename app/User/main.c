@@ -72,50 +72,73 @@ static void write_le16(uint8_t out[2], uint16_t value) {
   out[1] = (uint8_t)((value >> 8) & 0xFFu);
 }
 
+static bool build_param_payload(uint16_t dtype, proto_param_tx_t *out,
+                                uint8_t storage[DEV_CH_COUNT]) {
+  if (!out || !storage)
+    return false;
+
+  switch (dtype) {
+  case DT_UPLOAD_PERIOD: {
+    write_le16(storage, g_dev_cfg.dt_upload_period);
+    out->dtype = dtype;
+    out->lflag = 0x01;
+    out->len = 2;
+    out->data = storage;
+    return true;
+  }
+  case DT_OUTPUT_CTRL: {
+    dev_out_mode_t mode[DEV_CH_COUNT];
+    device_get_output_mode(&g_dev_cfg, mode);
+    for (uint8_t i = 0; i < DEV_CH_COUNT; ++i)
+      storage[i] = (uint8_t)mode[i];
+    out->dtype = dtype;
+    out->lflag = 0x01;
+    out->len = DEV_CH_COUNT;
+    out->data = storage;
+    return true;
+  }
+  case DT_T_ON_SET: {
+    write_le16(storage, device_get_work_time(&g_dev_cfg));
+    out->dtype = dtype;
+    out->lflag = 0x01;
+    out->len = 2;
+    out->data = storage;
+    return true;
+  }
+  case DT_T_OFF_SET: {
+    write_le16(storage, device_get_stop_time(&g_dev_cfg));
+    out->dtype = dtype;
+    out->lflag = 0x01;
+    out->len = 2;
+    out->data = storage;
+    return true;
+  }
+  case DT_FREQ_SET: {
+    write_le16(storage, device_get_us_freq(&g_dev_cfg));
+    out->dtype = dtype;
+    out->lflag = 0x01;
+    out->len = 2;
+    out->data = storage;
+    return true;
+  }
+  default:
+    return false;
+  }
+}
+
+static uint16_t clamp_upload_period(uint16_t period) {
+  if (period < 1)
+    period = 1;
+  if (period > 3600)
+    period = 3600;
+  return period;
+}
+
 static void send_param_query_ack(uint8_t req_set, const proto_frame_t *req) {
-  uint8_t upload_payload[2];
-  write_le16(upload_payload, g_dev_cfg.dt_upload_period);
-
-  dev_out_mode_t mode[DEV_CH_COUNT];
-  device_get_output_mode(&g_dev_cfg, mode);
-  uint8_t output_payload[DEV_CH_COUNT];
-  for (uint8_t i = 0; i < DEV_CH_COUNT; ++i)
-    output_payload[i] = (uint8_t)mode[i];
-
-  uint8_t work_payload[2];
-  write_le16(work_payload, device_get_work_time(&g_dev_cfg));
-
-  uint8_t stop_payload[2];
-  write_le16(stop_payload, device_get_stop_time(&g_dev_cfg));
-
-  uint8_t freq_payload[2];
-  write_le16(freq_payload, device_get_us_freq(&g_dev_cfg));
-
-  proto_param_tx_t catalog[] = {
-      {.dtype = DT_UPLOAD_PERIOD,
-       .lflag = 0x01,
-       .len = sizeof(upload_payload),
-       .data = upload_payload},
-      {.dtype = DT_OUTPUT_CTRL,
-       .lflag = 0x01,
-       .len = sizeof(output_payload),
-       .data = output_payload},
-      {.dtype = DT_T_ON_SET,
-       .lflag = 0x01,
-       .len = sizeof(work_payload),
-       .data = work_payload},
-      {.dtype = DT_T_OFF_SET,
-       .lflag = 0x01,
-       .len = sizeof(stop_payload),
-       .data = stop_payload},
-      {.dtype = DT_FREQ_SET,
-       .lflag = 0x01,
-       .len = sizeof(freq_payload),
-       .data = freq_payload},
-  };
-
-  proto_param_tx_t selected[sizeof(catalog) / sizeof(catalog[0])];
-  uint8_t selected_cnt = 0;
+  const uint16_t supported[] = {DT_UPLOAD_PERIOD, DT_OUTPUT_CTRL, DT_T_ON_SET,
+                                DT_T_OFF_SET,    DT_FREQ_SET};
+  uint16_t request_list[sizeof(supported) / sizeof(supported[0])];
+  uint8_t request_cnt = 0;
 
   bool query_all = true;
   if (req) {
@@ -123,36 +146,47 @@ static void send_param_query_ack(uint8_t req_set, const proto_frame_t *req) {
       query_all = false;
   }
 
-  const uint8_t catalog_count =
-      (uint8_t)(sizeof(catalog) / sizeof(catalog[0]));
+  const uint8_t supported_cnt =
+      (uint8_t)(sizeof(supported) / sizeof(supported[0]));
 
   if (query_all) {
-    for (uint8_t i = 0; i < catalog_count; ++i)
-      selected[selected_cnt++] = catalog[i];
-  } else {
+    for (uint8_t i = 0; i < supported_cnt; ++i)
+      request_list[request_cnt++] = supported[i];
+  } else if (req) {
     for (uint8_t i = 0; i < req->param_cnt; ++i) {
       uint16_t dtype = req->params[i].dtype;
-      for (uint8_t j = 0; j < catalog_count; ++j) {
-        if (catalog[j].dtype == dtype) {
+      for (uint8_t j = 0; j < supported_cnt; ++j) {
+        if (supported[j] == dtype) {
           bool already_added = false;
-          for (uint8_t k = 0; k < selected_cnt; ++k) {
-            if (selected[k].dtype == dtype) {
+          for (uint8_t k = 0; k < request_cnt; ++k) {
+            if (request_list[k] == dtype) {
               already_added = true;
               break;
             }
           }
-          if (!already_added && selected_cnt < catalog_count)
-            selected[selected_cnt++] = catalog[j];
+          if (!already_added && request_cnt < supported_cnt)
+            request_list[request_cnt++] = dtype;
           break;
         }
       }
     }
   }
 
-  if (selected_cnt == 0) {
+  if (request_cnt == 0) {
     printf("[CTRL-PARAM] no known params requested\r\n");
     send_control_status_ack(0x00);
     return;
+  }
+
+  proto_param_tx_t selected[sizeof(supported) / sizeof(supported[0])];
+  uint8_t payload_storage[sizeof(supported) / sizeof(supported[0])][DEV_CH_COUNT];
+  uint8_t selected_cnt = 0;
+
+  for (uint8_t i = 0; i < request_cnt; ++i) {
+    if (build_param_payload(request_list[i], &selected[selected_cnt],
+                            payload_storage[selected_cnt])) {
+      selected_cnt++;
+    }
   }
 
   uint8_t frame[160];
@@ -182,6 +216,175 @@ static void apply_sensor_id(const uint8_t new_id[6]) {
   printf("[SENSOR-ID] updated to %02X%02X%02X%02X%02X%02X\r\n", g_sensor_id[0],
          g_sensor_id[1], g_sensor_id[2], g_sensor_id[3], g_sensor_id[4],
          g_sensor_id[5]);
+}
+
+static void handle_param_set(const proto_frame_t *req) {
+  if (!req || req->param_cnt == 0) {
+    printf("[CTRL-PARAM] empty set request\r\n");
+    uint8_t frame[32];
+    size_t frame_len = proto_build_control_param_ack(
+        g_sensor_id, CTRL_PARAM_QS, req->req_set, NULL, 0, frame,
+        sizeof(frame));
+    if (frame_len)
+      usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+    return;
+  }
+
+  bool ok = true;
+  bool any_known = false;
+
+  uint16_t new_upload = g_dev_cfg.dt_upload_period;
+  uint16_t new_work = device_get_work_time(&g_dev_cfg);
+  uint16_t new_stop = device_get_stop_time(&g_dev_cfg);
+  uint16_t new_freq = device_get_us_freq(&g_dev_cfg);
+  dev_out_mode_t new_modes[DEV_CH_COUNT];
+  for (uint8_t i = 0; i < DEV_CH_COUNT; ++i)
+    new_modes[i] = DEV_OUT_KEEP;
+
+  bool set_upload = false;
+  bool set_work = false;
+  bool set_stop = false;
+  bool set_freq = false;
+  bool set_output = false;
+
+  for (uint8_t i = 0; i < req->param_cnt; ++i) {
+    const proto_param_t *p = &req->params[i];
+    switch (p->dtype) {
+    case DT_UPLOAD_PERIOD:
+      any_known = true;
+      if (p->lflag != 0x01 || p->len != 2) {
+        ok = false;
+        printf("[CTRL-PARAM] upload period invalid len=%lu lflag=0x%02X\r\n",
+               (unsigned long)p->len, p->lflag);
+        break;
+      }
+      new_upload = (uint16_t)(p->val[0] | (p->val[1] << 8));
+      if (new_upload == 0) {
+        ok = false;
+        printf("[CTRL-PARAM] upload period zero invalid\r\n");
+        break;
+      }
+      new_upload = clamp_upload_period(new_upload);
+      set_upload = true;
+      break;
+    case DT_OUTPUT_CTRL:
+      any_known = true;
+      if (p->lflag != 0x01 || p->len != DEV_CH_COUNT) {
+        ok = false;
+        printf("[CTRL-PARAM] output ctrl invalid len=%lu lflag=0x%02X\r\n",
+               (unsigned long)p->len, p->lflag);
+        break;
+      }
+      for (uint8_t ch = 0; ch < DEV_CH_COUNT; ++ch) {
+        uint8_t mode = p->val[ch];
+        if (mode > DEV_OUT_OFF) {
+          ok = false;
+          printf("[CTRL-PARAM] output ctrl bad mode[%u]=%u\r\n", ch, mode);
+          break;
+        }
+        new_modes[ch] = (dev_out_mode_t)mode;
+      }
+      if (!ok)
+        break;
+      set_output = true;
+      break;
+    case DT_T_ON_SET:
+      any_known = true;
+      if (p->lflag != 0x01 || p->len != 2) {
+        ok = false;
+        printf("[CTRL-PARAM] work time invalid len=%lu lflag=0x%02X\r\n",
+               (unsigned long)p->len, p->lflag);
+        break;
+      }
+      new_work = (uint16_t)(p->val[0] | (p->val[1] << 8));
+      set_work = true;
+      break;
+    case DT_T_OFF_SET:
+      any_known = true;
+      if (p->lflag != 0x01 || p->len != 2) {
+        ok = false;
+        printf("[CTRL-PARAM] stop time invalid len=%lu lflag=0x%02X\r\n",
+               (unsigned long)p->len, p->lflag);
+        break;
+      }
+      new_stop = (uint16_t)(p->val[0] | (p->val[1] << 8));
+      set_stop = true;
+      break;
+    case DT_FREQ_SET:
+      any_known = true;
+      if (p->lflag != 0x01 || p->len != 2) {
+        ok = false;
+        printf("[CTRL-PARAM] freq invalid len=%lu lflag=0x%02X\r\n",
+               (unsigned long)p->len, p->lflag);
+        break;
+      }
+      new_freq = (uint16_t)(p->val[0] | (p->val[1] << 8));
+      set_freq = true;
+      break;
+    default:
+      printf("[CTRL-PARAM] unsupported dtype=0x%04X\r\n", p->dtype);
+      ok = false;
+      break;
+    }
+
+    if (!ok)
+      break;
+  }
+
+  if (!ok || !any_known) {
+    uint8_t frame[32];
+    size_t frame_len = proto_build_control_param_ack(g_sensor_id, CTRL_PARAM_QS,
+                                                     req->req_set, NULL, 0, frame,
+                                                     sizeof(frame));
+    if (frame_len)
+      usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+    if (!any_known)
+      printf("[CTRL-PARAM] no supported parameters in set\r\n");
+    return;
+  }
+
+  if (set_upload)
+    g_dev_cfg.dt_upload_period = new_upload;
+  if (set_work)
+    device_set_work_time(&g_dev_cfg, new_work);
+  if (set_stop)
+    device_set_stop_time(&g_dev_cfg, new_stop);
+  if (set_freq)
+    device_set_us_freq(&g_dev_cfg, new_freq);
+  if (set_output)
+    device_set_output_mode(&g_dev_cfg, new_modes);
+
+  proto_param_tx_t params[5];
+  uint8_t payloads[5][DEV_CH_COUNT];
+  uint8_t param_cnt = 0;
+
+  if (set_upload && build_param_payload(DT_UPLOAD_PERIOD, &params[param_cnt],
+                                        payloads[param_cnt]))
+    param_cnt++;
+  if (set_output && build_param_payload(DT_OUTPUT_CTRL, &params[param_cnt],
+                                        payloads[param_cnt]))
+    param_cnt++;
+  if (set_work && build_param_payload(DT_T_ON_SET, &params[param_cnt],
+                                      payloads[param_cnt]))
+    param_cnt++;
+  if (set_stop && build_param_payload(DT_T_OFF_SET, &params[param_cnt],
+                                      payloads[param_cnt]))
+    param_cnt++;
+  if (set_freq && build_param_payload(DT_FREQ_SET, &params[param_cnt],
+                                      payloads[param_cnt]))
+    param_cnt++;
+
+  uint8_t frame[160];
+  size_t frame_len = proto_build_control_param_ack(
+      g_sensor_id, CTRL_PARAM_QS, req->req_set, params, param_cnt, frame,
+      sizeof(frame));
+  if (!frame_len) {
+    printf("[CTRL-PARAM] build set ack failed\r\n");
+    return;
+  }
+
+  usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+  printf("[CTRL-PARAM] set applied ack cnt=%u\r\n", param_cnt);
 }
 
 /* ====== LED：默认 PC13（可按板子改） ====== */
@@ -255,8 +458,7 @@ static void on_control(proto_ctx_t *ctx, const proto_frame_t *f) {
     if (f->req_set == 0) {
       send_param_query_ack(f->req_set, f);
     } else {
-      printf("[CTRL-PARAM] set not supported\r\n");
-      send_control_status_ack(0x00);
+      handle_param_set(f);
     }
   }
 }
