@@ -36,6 +36,7 @@
 #define REPORT_ERROR_RECOVERY_THRESHOLD 5u
 #define ZM32_REJOIN_DELAY_MS 2000u
 #define ZM32_POST_RESTORE_DELAY_MS 500u
+#define ZM32_BOOT_READY_DELAY_MS 1500u
 
 /* Global Variable */
 
@@ -795,9 +796,6 @@ int main(void) {
   usart2_dma_idle_init();
   // printf("\r\n[BOOT] USART2 DMA+IDLE ready. Send data to see chunks...\r\n");
 
-  configure_zm32_defaults();
-  fetch_zm32_info();
-
   led_init();
   // 协议解析上下文初始化
   proto_init(&g_proto);
@@ -815,6 +813,12 @@ int main(void) {
   device_logic_init(&g_dev_cfg, &g_dev_rt); // 配置初始化
   device_hw_init();                         // 硬件初始化
   timer_init();                             // 定时器初始化
+
+  printf("[ZM32] wait %u ms for module boot...\r\n", ZM32_BOOT_READY_DELAY_MS);
+  Delay_Ms(ZM32_BOOT_READY_DELAY_MS);
+
+  configure_zm32_defaults();
+  fetch_zm32_info();
 
   printf("\r\n=== APP %s @0x08003000 ===\r\n", APP_VERSION);
 
