@@ -73,6 +73,6 @@ C_DEPS += \
 
 # Each subdirectory must supply rules for building sources it contributes
 Peripheral/src/%.o: ../Peripheral/src/%.c
-	@	@	riscv-none-embed-gcc -march=rv32imacxw -mabi=ilp32 -msmall-data-limit=8 -msave-restore -Os -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized  -g -DCH32V20x -I"C:\Users\zhang\Desktop\work\4G\ZigBee\app\qn-zigbee\app\Debug" -I"C:\Users\zhang\Desktop\work\4G\ZigBee\app\qn-zigbee\app\userlib" -I"C:\Users\zhang\Desktop\work\4G\ZigBee\app\qn-zigbee\app\Core" -I"C:\Users\zhang\Desktop\work\4G\ZigBee\app\qn-zigbee\app\User" -I"C:\Users\zhang\Desktop\work\4G\ZigBee\app\qn-zigbee\app\Peripheral\inc" -std=gnu99 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@)" -c -o "$@" "$<"
+	@	@	riscv-none-embed-gcc -march=rv32imacxw -mabi=ilp32 -msmall-data-limit=8 -msave-restore -Os -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized  -g -DCH32V20x -I"C:\Users\zhang\Desktop\work\4G\ZigBee\app\github\app\Debug" -I"C:\Users\zhang\Desktop\work\4G\ZigBee\app\github\app\userlib" -I"C:\Users\zhang\Desktop\work\4G\ZigBee\app\github\app\Core" -I"C:\Users\zhang\Desktop\work\4G\ZigBee\app\github\app\User" -I"C:\Users\zhang\Desktop\work\4G\ZigBee\app\github\app\Peripheral\inc" -std=gnu99 -MMD -MP -MF"$(@:%.o=%.d)" -MT"$(@)" -c -o "$@" "$<"
 	@	@
 

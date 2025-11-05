@@ -110,7 +110,7 @@ static void hw_init_usonic_pwm(void) {
   TIM_TimeBaseStructInit(&tb);
   tb.TIM_ClockDivision = TIM_CKD_DIV1;
   tb.TIM_CounterMode = TIM_CounterMode_Up;
-  tb.TIM_Prescaler = 96 - 1;
+  tb.TIM_Prescaler = SystemCoreClock / 1000000 - 1;
   tb.TIM_Period = 1000 - 1; // 设置 PWM 频率
   tb.TIM_RepetitionCounter = 0;
   TIM_TimeBaseInit(USONIC_TIM, &tb);
@@ -118,15 +118,17 @@ static void hw_init_usonic_pwm(void) {
   /* 配置 TIM1 通道 3 为 PWM 输出模式 */
   TIM_OCStructInit(&oc);
   oc.TIM_OCMode = TIM_OCMode_PWM1;
-  oc.TIM_OutputState = TIM_OutputState_Disable;
-  oc.TIM_OCIdleState = TIM_OCNIdleState_Reset;
-  oc.TIM_OutputNState = TIM_OutputState_Enable;
-  oc.TIM_OCNIdleState = TIM_OCIdleState_Set;
+  oc.TIM_OutputState = TIM_OutputState_Enable;
+  oc.TIM_OCIdleState = TIM_OCIdleState_Set;
+  oc.TIM_OutputNState = TIM_OutputNState_Enable;
+  oc.TIM_OCNIdleState = TIM_OCNIdleState_Reset;
   oc.TIM_Pulse = 500; // 占空比为 50%
-  oc.TIM_OCPolarity = TIM_OCPolarity_High;
-  oc.TIM_OCNPolarity = TIM_OCPolarity_Low;
+  oc.TIM_OCPolarity = TIM_OCPolarity_Low;
+  oc.TIM_OCNPolarity = TIM_OCNPolarity_Low;
   TIM_OC3Init(USONIC_TIM, &oc);
   TIM_OC3PreloadConfig(USONIC_TIM, TIM_OCPreload_Disable);
+  TIM_CtrlPWMOutputs(USONIC_TIM, ENABLE);
+  TIM_ARRPreloadConfig(USONIC_TIM, ENABLE);
 
   TIM_ARRPreloadConfig(USONIC_TIM, ENABLE);
 

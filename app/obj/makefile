@@ -54,7 +54,7 @@ all: app.elf secondary-outputs
 
 # 工具调用
 app.elf: $(OBJS) $(USER_OBJS)
-	@	@	riscv-none-embed-gcc -march=rv32imacxw -mabi=ilp32 -msmall-data-limit=8 -msave-restore -Os -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized  -g -T "C:\Users\zhang\Desktop\work\4G\ZigBee\app\qn-zigbee\app\Ld\Link.ld" -nostartfiles -Xlinker --gc-sections -L"C:\Users\zhang\Desktop\work\4G\ZigBee\app\qn-zigbee\app\userlib" -Xlinker --print-memory-usage -Wl,-Map,"app.map" --specs=nano.specs --specs=nosys.specs -o "app.elf" $(OBJS) $(USER_OBJS) $(LIBS)
+	@	@	riscv-none-embed-gcc -march=rv32imacxw -mabi=ilp32 -msmall-data-limit=8 -msave-restore -Os -fmessage-length=0 -fsigned-char -ffunction-sections -fdata-sections -fno-common -Wunused -Wuninitialized  -g -T "C:\Users\zhang\Desktop\work\4G\ZigBee\app\github\app\Ld\Link.ld" -nostartfiles -Xlinker --gc-sections -L"C:\Users\zhang\Desktop\work\4G\ZigBee\app\github\app\userlib" -Xlinker --print-memory-usage -Wl,-Map,"app.map" --specs=nano.specs --specs=nosys.specs -o "app.elf" $(OBJS) $(USER_OBJS) $(LIBS)
 	@	@
 app.hexAndbin: app.elf
 	@	riscv-none-embed-objcopy -O ihex "app.elf"  "app.hex" && riscv-none-embed-objcopy -O binary "app.elf"  "app.bin"

@@ -22,10 +22,11 @@
 #include "device_hw.h"
 #include "device_logic.h" // ★ 新增：设备逻辑层
 #include "proto.h"
-#include "timer.h"
 #include "report_manager.h"
+#include "timer.h"
 #include "usart2_dma.h"
 #include <string.h>
+
 
 /* Global typedef */
 
@@ -56,9 +57,8 @@ static void send_control_status_ack(uint8_t status) {
 
 static void send_control_id_ack(uint8_t req_set, const uint8_t id_payload[6]) {
   uint8_t frame[24];
-  size_t frame_len = proto_build_control_id_ack(g_sensor_id, CTRL_ID_QS, req_set,
-                                                id_payload, frame,
-                                                sizeof(frame));
+  size_t frame_len = proto_build_control_id_ack(
+      g_sensor_id, CTRL_ID_QS, req_set, id_payload, frame, sizeof(frame));
   if (!frame_len)
     return;
   usart2_tx_write_blocking(frame, (uint16_t)frame_len);
@@ -136,7 +136,7 @@ static uint16_t clamp_upload_period(uint16_t period) {
 
 static void send_param_query_ack(uint8_t req_set, const proto_frame_t *req) {
   const uint16_t supported[] = {DT_UPLOAD_PERIOD, DT_OUTPUT_CTRL, DT_T_ON_SET,
-                                DT_T_OFF_SET,    DT_FREQ_SET};
+                                DT_T_OFF_SET, DT_FREQ_SET};
   uint16_t request_list[sizeof(supported) / sizeof(supported[0])];
   uint8_t request_cnt = 0;
 
@@ -179,7 +179,8 @@ static void send_param_query_ack(uint8_t req_set, const proto_frame_t *req) {
   }
 
   proto_param_tx_t selected[sizeof(supported) / sizeof(supported[0])];
-  uint8_t payload_storage[sizeof(supported) / sizeof(supported[0])][DEV_CH_COUNT];
+  uint8_t payload_storage[sizeof(supported) / sizeof(supported[0])]
+                         [DEV_CH_COUNT];
   uint8_t selected_cnt = 0;
 
   for (uint8_t i = 0; i < request_cnt; ++i) {
@@ -190,10 +191,9 @@ static void send_param_query_ack(uint8_t req_set, const proto_frame_t *req) {
   }
 
   uint8_t frame[160];
-  size_t frame_len =
-      proto_build_control_param_ack(g_sensor_id, CTRL_PARAM_QS, req_set,
-                                    selected,
-                                    selected_cnt, frame, sizeof(frame));
+  size_t frame_len = proto_build_control_param_ack(
+      g_sensor_id, CTRL_PARAM_QS, req_set, selected, selected_cnt, frame,
+      sizeof(frame));
   if (!frame_len) {
     printf("[CTRL-PARAM] build ack failed\r\n");
     return;
@@ -297,9 +297,9 @@ static void handle_output_set(const proto_frame_t *req) {
 
   if (!ok || !any_known) {
     uint8_t frame[32];
-    size_t frame_len = proto_build_control_param_ack(
-        g_sensor_id, CTRL_OUTPUT_QS, req->req_set, NULL, 0, frame,
-        sizeof(frame));
+    size_t frame_len =
+        proto_build_control_param_ack(g_sensor_id, CTRL_OUTPUT_QS, req->req_set,
+                                      NULL, 0, frame, sizeof(frame));
     if (frame_len)
       usart2_tx_write_blocking(frame, (uint16_t)frame_len);
     if (!any_known)
@@ -317,9 +317,9 @@ static void handle_output_set(const proto_frame_t *req) {
   }
 
   uint8_t frame[96];
-  size_t frame_len = proto_build_control_param_ack(
-      g_sensor_id, CTRL_OUTPUT_QS, req->req_set, &param, 1, frame,
-      sizeof(frame));
+  size_t frame_len =
+      proto_build_control_param_ack(g_sensor_id, CTRL_OUTPUT_QS, req->req_set,
+                                    &param, 1, frame, sizeof(frame));
   if (!frame_len) {
     printf("[CTRL-OUTPUT] build set ack failed\r\n");
     return;
@@ -348,9 +348,9 @@ static void handle_param_set(const proto_frame_t *req) {
   if (!req || req->param_cnt == 0) {
     printf("[CTRL-PARAM] empty set request\r\n");
     uint8_t frame[32];
-    size_t frame_len = proto_build_control_param_ack(
-        g_sensor_id, CTRL_PARAM_QS, req->req_set, NULL, 0, frame,
-        sizeof(frame));
+    size_t frame_len =
+        proto_build_control_param_ack(g_sensor_id, CTRL_PARAM_QS, req->req_set,
+                                      NULL, 0, frame, sizeof(frame));
     if (frame_len)
       usart2_tx_write_blocking(frame, (uint16_t)frame_len);
     return;
@@ -459,9 +459,9 @@ static void handle_param_set(const proto_frame_t *req) {
 
   if (!ok || !any_known) {
     uint8_t frame[32];
-    size_t frame_len = proto_build_control_param_ack(g_sensor_id, CTRL_PARAM_QS,
-                                                     req->req_set, NULL, 0, frame,
-                                                     sizeof(frame));
+    size_t frame_len =
+        proto_build_control_param_ack(g_sensor_id, CTRL_PARAM_QS, req->req_set,
+                                      NULL, 0, frame, sizeof(frame));
     if (frame_len)
       usart2_tx_write_blocking(frame, (uint16_t)frame_len);
     if (!any_known)
@@ -490,20 +490,20 @@ static void handle_param_set(const proto_frame_t *req) {
   if (set_output && build_param_payload(DT_OUTPUT_CTRL, &params[param_cnt],
                                         payloads[param_cnt]))
     param_cnt++;
-  if (set_work && build_param_payload(DT_T_ON_SET, &params[param_cnt],
-                                      payloads[param_cnt]))
+  if (set_work &&
+      build_param_payload(DT_T_ON_SET, &params[param_cnt], payloads[param_cnt]))
     param_cnt++;
   if (set_stop && build_param_payload(DT_T_OFF_SET, &params[param_cnt],
                                       payloads[param_cnt]))
     param_cnt++;
-  if (set_freq && build_param_payload(DT_FREQ_SET, &params[param_cnt],
-                                      payloads[param_cnt]))
+  if (set_freq &&
+      build_param_payload(DT_FREQ_SET, &params[param_cnt], payloads[param_cnt]))
     param_cnt++;
 
   uint8_t frame[160];
-  size_t frame_len = proto_build_control_param_ack(
-      g_sensor_id, CTRL_PARAM_QS, req->req_set, params, param_cnt, frame,
-      sizeof(frame));
+  size_t frame_len =
+      proto_build_control_param_ack(g_sensor_id, CTRL_PARAM_QS, req->req_set,
+                                    params, param_cnt, frame, sizeof(frame));
   if (!frame_len) {
     printf("[CTRL-PARAM] build set ack failed\r\n");
     return;
@@ -673,14 +673,14 @@ int main(void) {
   //     DEV_OUT_OFF, DEV_OUT_OFF, DEV_OUT_OFF, DEV_OUT_OFF};
   // device_set_output_mode(&g_dev_cfg, led_mode);
   // 设置超声波的频率为 25kHz（测试）
-  //  hw_usonic_set_freq(25000); // 设置超声波频率为 25kHz
+//   hw_usonic_set_freq(25000); // 设置超声波频率为 25kHz
 
   while (1) {
-     uint16_t n = usart2_pull_chunk(g_rx_chunk, sizeof(g_rx_chunk));
-     if (n) {
-       // 喂给解析器（内部可一次解析多帧）
-       proto_feed(&g_proto, g_rx_chunk, n);
-     }
-     report_manager_process();
+    uint16_t n = usart2_pull_chunk(g_rx_chunk, sizeof(g_rx_chunk));
+    if (n) {
+      // 喂给解析器（内部可一次解析多帧）
+      proto_feed(&g_proto, g_rx_chunk, n);
+    }
+    report_manager_process();
   }
 }
