@@ -203,6 +203,132 @@ static void send_param_query_ack(uint8_t req_set, const proto_frame_t *req) {
   printf("[CTRL-ACK-PARAM] cnt=%u rs=%u\r\n", selected_cnt, req_set);
 }
 
+static void send_output_query_ack(uint8_t req_set, const proto_frame_t *req) {
+  bool query_all = true;
+  if (req) {
+    if ((req->hdr.param_count != 0x0Fu) && req->param_cnt > 0)
+      query_all = false;
+  }
+
+  bool want_output = query_all;
+
+  if (!want_output && req) {
+    for (uint8_t i = 0; i < req->param_cnt; ++i) {
+      if (req->params[i].dtype == DT_OUTPUT_CTRL) {
+        want_output = true;
+        break;
+      }
+    }
+  }
+
+  if (!want_output) {
+    printf("[CTRL-OUTPUT] no known params requested\r\n");
+    uint8_t frame[32];
+    size_t frame_len = proto_build_control_param_ack(
+        g_sensor_id, CTRL_OUTPUT_QS, req_set, NULL, 0, frame, sizeof(frame));
+    if (frame_len)
+      usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+    return;
+  }
+
+  proto_param_tx_t param;
+  uint8_t payload[DEV_CH_COUNT];
+  if (!build_param_payload(DT_OUTPUT_CTRL, &param, payload)) {
+    printf("[CTRL-OUTPUT] build payload failed\r\n");
+    return;
+  }
+
+  uint8_t frame[96];
+  size_t frame_len = proto_build_control_param_ack(
+      g_sensor_id, CTRL_OUTPUT_QS, req_set, &param, 1, frame, sizeof(frame));
+  if (!frame_len) {
+    printf("[CTRL-OUTPUT] build query ack failed\r\n");
+    return;
+  }
+
+  usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+  printf("[CTRL-ACK-OUTPUT] query\r\n");
+}
+
+static void handle_output_set(const proto_frame_t *req) {
+  if (!req || req->param_cnt == 0) {
+    printf("[CTRL-OUTPUT] empty set request\r\n");
+    uint8_t frame[32];
+    size_t frame_len = proto_build_control_param_ack(
+        g_sensor_id, CTRL_OUTPUT_QS, req ? req->req_set : 1, NULL, 0, frame,
+        sizeof(frame));
+    if (frame_len)
+      usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+    return;
+  }
+
+  bool ok = true;
+  bool any_known = false;
+
+  dev_out_mode_t new_modes[DEV_CH_COUNT];
+  device_get_output_mode(&g_dev_cfg, new_modes);
+
+  for (uint8_t i = 0; i < req->param_cnt; ++i) {
+    const proto_param_t *p = &req->params[i];
+    if (p->dtype != DT_OUTPUT_CTRL) {
+      printf("[CTRL-OUTPUT] unsupported dtype=0x%04X\r\n", p->dtype);
+      ok = false;
+      break;
+    }
+    any_known = true;
+    if (p->lflag != 0x01 || p->len != DEV_CH_COUNT) {
+      printf("[CTRL-OUTPUT] invalid len=%lu lflag=0x%02X\r\n",
+             (unsigned long)p->len, p->lflag);
+      ok = false;
+      break;
+    }
+    for (uint8_t ch = 0; ch < DEV_CH_COUNT; ++ch) {
+      uint8_t mode = p->val[ch];
+      if (mode > DEV_OUT_OFF) {
+        printf("[CTRL-OUTPUT] bad mode[%u]=%u\r\n", ch, mode);
+        ok = false;
+        break;
+      }
+      new_modes[ch] = (dev_out_mode_t)mode;
+    }
+    if (!ok)
+      break;
+  }
+
+  if (!ok || !any_known) {
+    uint8_t frame[32];
+    size_t frame_len = proto_build_control_param_ack(
+        g_sensor_id, CTRL_OUTPUT_QS, req->req_set, NULL, 0, frame,
+        sizeof(frame));
+    if (frame_len)
+      usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+    if (!any_known)
+      printf("[CTRL-OUTPUT] no supported parameters in set\r\n");
+    return;
+  }
+
+  device_set_output_mode(&g_dev_cfg, new_modes);
+
+  proto_param_tx_t param;
+  uint8_t payload[DEV_CH_COUNT];
+  if (!build_param_payload(DT_OUTPUT_CTRL, &param, payload)) {
+    printf("[CTRL-OUTPUT] build response payload failed\r\n");
+    return;
+  }
+
+  uint8_t frame[96];
+  size_t frame_len = proto_build_control_param_ack(
+      g_sensor_id, CTRL_OUTPUT_QS, req->req_set, &param, 1, frame,
+      sizeof(frame));
+  if (!frame_len) {
+    printf("[CTRL-OUTPUT] build set ack failed\r\n");
+    return;
+  }
+
+  usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+  printf("[CTRL-ACK-OUTPUT] set applied\r\n");
+}
+
 static void apply_sensor_id(const uint8_t new_id[6]) {
   if (!new_id)
     return;
@@ -459,6 +585,12 @@ static void on_control(proto_ctx_t *ctx, const proto_frame_t *f) {
       send_param_query_ack(f->req_set, f);
     } else {
       handle_param_set(f);
+    }
+  } else if (f->ctrl_type == CTRL_OUTPUT_QS) {
+    if (f->req_set == 0) {
+      send_output_query_ack(f->req_set, f);
+    } else {
+      handle_output_set(f);
     }
   }
 }
