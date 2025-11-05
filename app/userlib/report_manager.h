@@ -12,6 +12,7 @@ void report_manager_tick_1s(void);
 void report_manager_tick_ms(uint16_t delta_ms);
 void report_manager_process(void);
 void report_manager_on_monitor_ack(const proto_frame_t *frame);
+void report_manager_request_immediate(void);
 uint32_t report_manager_get_error_count(void);
 
 #endif

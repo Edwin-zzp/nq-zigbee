@@ -60,6 +60,16 @@ static void led_init(void) {
   GPIO_SetBits(LED_GPIO, LED_PIN); // 默认熄灭（看你板载LED极性）
 }
 
+static void send_control_status_ack(uint8_t status) {
+  uint8_t frame[16];
+  size_t frame_len = proto_build_control_status_ack(kLocalSensorID, status,
+                                                    frame, sizeof(frame));
+  if (!frame_len)
+    return;
+  usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+  printf("[CTRL-ACK-CS] tx status=0x%02X\r\n", status);
+}
+
 // —— 回调打印：你可以在这里对接业务逻辑 ——
 static void on_monitor(proto_ctx_t *ctx, const proto_frame_t *f) {
   (void)ctx;
@@ -67,7 +77,7 @@ static void on_monitor(proto_ctx_t *ctx, const proto_frame_t *f) {
   int m = snprintf(msg, sizeof(msg), "[MON] params=%u raw=%uB\r\n",
                    f->param_cnt, f->raw_len);
   if (m > 0)
-    printf(msg);
+    printf("%s", msg);
 
   // 这里可以按 f->params[i].dtype / len / val[] 去解析具体业务参数
 }
@@ -80,7 +90,7 @@ static void on_monitor_ack(proto_ctx_t *ctx, const proto_frame_t *f) {
   int m =
       snprintf(msg, sizeof(msg), "[MON-ACK] status=0x%02X\r\n", f->cmd_status);
   if (m > 0)
-    printf(msg);
+    printf("%s", msg);
 }
 // 100 控制请求（如果本机是“终端+从机”，一般用不到，从机更多处理 100→101）
 static void on_control(proto_ctx_t *ctx, const proto_frame_t *f) {
@@ -90,7 +100,15 @@ static void on_control(proto_ctx_t *ctx, const proto_frame_t *f) {
                    "[CTRL] type=0x%02X rs=%u param_cnt=%u has_id=%u\r\n",
                    f->ctrl_type, f->req_set, f->param_cnt, f->has_id_payload);
   if (m > 0)
-    printf(msg);
+    printf("%s", msg);
+
+  if (f->ctrl_type == CTRL_REQ_MONITOR) {
+    uint8_t status = (f->req_set == 0) ? 0xFF : 0x00;
+    send_control_status_ack(status);
+    if (status == 0xFF) {
+      report_manager_request_immediate();
+    }
+  }
 }
 // 101 控制响应
 static void on_control_ack(proto_ctx_t *ctx, const proto_frame_t *f) {
@@ -105,19 +123,19 @@ static void on_control_ack(proto_ctx_t *ctx, const proto_frame_t *f) {
         f->ctrl_type, f->req_set, f->id_payload[0], f->id_payload[1],
         f->id_payload[2], f->id_payload[3], f->id_payload[4], f->id_payload[5]);
     if (m > 0)
-      printf(msg);
+      printf("%s", msg);
   } else if (f->has_cmd_status && f->param_cnt == 0) {
     // 仅状态的响应（例如“请求监测数据”的应答）
     int m = snprintf(msg, sizeof(msg), "[CTRL-ACK-CS] status=0x%02X\r\n",
                      f->cmd_status);
     if (m > 0)
-      printf(msg);
+      printf("%s", msg);
   } else {
     // 参数 / 输出 查询/设置 的响应（ParameterList）
     int m = snprintf(msg, sizeof(msg), "[CTRL-ACK] param_cnt=%u raw_len=%u\r\n",
                      f->param_cnt, f->raw_len);
     if (m > 0)
-      printf(msg);
+      printf("%s", msg);
   }
 
   // 这里同样可以按 f->params[i].dtype / len / val[] 做业务处理

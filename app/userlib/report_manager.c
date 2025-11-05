@@ -146,6 +146,15 @@ void report_manager_process(void) {
   }
 }
 
+void report_manager_request_immediate(void) {
+  s_report_ctx.elapsed_s = 0;
+  if (s_report_ctx.state == REPORT_STATE_IDLE) {
+    send_monitor_report();
+  } else {
+    s_report_ctx.send_pending = 1;
+  }
+}
+
 void report_manager_on_monitor_ack(const proto_frame_t *frame) {
   if (!frame || !frame->has_cmd_status)
     return;

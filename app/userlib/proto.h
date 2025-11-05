@@ -148,6 +148,9 @@ size_t proto_build_monitor_frame(const uint8_t sensor_id[6],
                                  const proto_param_tx_t *params,
                                  uint8_t param_cnt, uint8_t *out,
                                  size_t maxlen);
+size_t proto_build_control_status_ack(const uint8_t sensor_id[6],
+                                      uint8_t status, uint8_t *out,
+                                      size_t maxlen);
 
 #ifdef __cplusplus
 }

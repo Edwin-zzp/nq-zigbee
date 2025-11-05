@@ -82,6 +82,29 @@ size_t proto_build_monitor_frame(const uint8_t sensor_id[6],
   return pos;
 }
 
+size_t proto_build_control_status_ack(const uint8_t sensor_id[6],
+                                      uint8_t status, uint8_t *out,
+                                      size_t maxlen) {
+  if (!sensor_id || !out)
+    return 0;
+  const size_t needed = 6u + 1u + 1u + 2u; // SensorID + ctrl + status + CRC
+  if (maxlen < needed)
+    return 0;
+
+  size_t pos = 0;
+  memcpy(out, sensor_id, 6);
+  pos += 6;
+
+  out[pos++] = PKT_CONTROL_ACK; // DataLen=0, Frag=0, PacketType=101b
+  out[pos++] = status;
+
+  uint16_t crc = crc16_modbus(out, pos);
+  out[pos++] = (uint8_t)(crc & 0xFF);
+  out[pos++] = (uint8_t)((crc >> 8) & 0xFF);
+
+  return pos;
+}
+
 // ---- 工具：从控制字节拆位（规范：DataLen/FragInd/PacketType） ----
 static inline uint8_t _get_param_count(uint8_t ctrl) {
   return (ctrl >> 4) & 0x0F;
