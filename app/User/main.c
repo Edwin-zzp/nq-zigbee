@@ -22,6 +22,7 @@
 #include "device_hw.h"
 #include "device_logic.h" // ★ 新增：设备逻辑层
 #include "proto.h"
+#include "report_manager.h"
 #include "timer.h"
 #include "usart2_dma.h"
 
@@ -74,6 +75,7 @@ static void on_monitor_ack(proto_ctx_t *ctx, const proto_frame_t *f) {
   (void)ctx;
   if (!f->has_cmd_status)
     return;
+  report_manager_on_monitor_ack(f);
   char msg[64];
   int m =
       snprintf(msg, sizeof(msg), "[MON-ACK] status=0x%02X\r\n", f->cmd_status);
@@ -146,6 +148,7 @@ int main(void) {
   //   后续 proto_feed() 解析的每一帧，会先比对帧头里的 SensorID 与这里的值：
   //   如果不一致，则 f->dropped_by_id=1，且不会进入任何回调，相当于“废弃帧”。
   proto_set_local_id(&g_proto, kLocalSensorID);
+  report_manager_init(kLocalSensorID);
 
   g_proto.on_monitor = on_monitor;
   g_proto.on_monitor_ack = on_monitor_ack;
@@ -171,10 +174,11 @@ int main(void) {
   //  hw_usonic_set_freq(25000); // 设置超声波频率为 25kHz
 
   while (1) {
-     uint16_t n = usart2_pull_chunk(g_rx_chunk, sizeof(g_rx_chunk));
-     if (n) {
-       // 喂给解析器（内部可一次解析多帧）
-       proto_feed(&g_proto, g_rx_chunk, n);
-     }
+    uint16_t n = usart2_pull_chunk(g_rx_chunk, sizeof(g_rx_chunk));
+    if (n) {
+      // 喂给解析器（内部可一次解析多帧）
+      proto_feed(&g_proto, g_rx_chunk, n);
+    }
+    report_manager_process();
   }
 }

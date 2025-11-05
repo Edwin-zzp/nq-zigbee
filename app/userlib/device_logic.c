@@ -39,7 +39,7 @@ void device_logic_init(device_config_t *cfg, device_runtime_t *rt) {
   /* 默认配置：全部安全关闭，由上位机通过协议设置为 ON */
   cfg->work_time_s = 30;      /* 默认工作 30s */
   cfg->stop_time_s = 30;      /* 默认停止 30s */
-  cfg->dt_upload_period = 60; /* 默认上传周期 60s */
+  cfg->dt_upload_period = 10; /* 默认上传周期 60s */
   cfg->us_freq_hz = DEV_US_FREQ_DEFAULT;
 
   for (int i = 0; i < DEV_CH_COUNT; ++i) {

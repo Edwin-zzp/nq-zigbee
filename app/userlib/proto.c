@@ -5,6 +5,83 @@
 #include "crc16.h"
 #include <string.h>
 
+// ---- 发送端：编码 ParameterList 项 ----
+size_t proto_encode_param(uint8_t *out, size_t maxlen,
+                          const proto_param_tx_t *param) {
+  if (!out || !param)
+    return 0;
+  if (maxlen < 2)
+    return 0;
+
+  uint16_t type_len = (uint16_t)((param->dtype << 2) | (param->lflag & 0x03));
+  out[0] = (uint8_t)(type_len & 0xFF);
+  out[1] = (uint8_t)((type_len >> 8) & 0xFF);
+
+  size_t pos = 2;
+  uint32_t payload_len = param->len;
+
+  if (param->lflag == 0) {
+    // 无 length 字段，数据固定 4B
+    if (payload_len != 4)
+      return 0;
+  } else {
+    uint8_t len_bytes = (param->lflag == 1) ? 1 : (param->lflag == 2 ? 2 : 3);
+    if (maxlen < pos + len_bytes)
+      return 0;
+    for (uint8_t i = 0; i < len_bytes; ++i)
+      out[pos + i] = (uint8_t)((payload_len >> (8 * i)) & 0xFF);
+    pos += len_bytes;
+  }
+
+  if (payload_len > 0) {
+    if (!param->data)
+      return 0;
+    if (maxlen < pos + payload_len)
+      return 0;
+    memcpy(&out[pos], param->data, payload_len);
+    pos += payload_len;
+  }
+
+  return pos;
+}
+
+size_t proto_build_monitor_frame(const uint8_t sensor_id[6],
+                                 const proto_param_tx_t *params,
+                                 uint8_t param_cnt, uint8_t *out,
+                                 size_t maxlen) {
+  if (!sensor_id || !out)
+    return 0;
+  if (param_cnt > 0x0F)
+    return 0; // DataLen 仅 4 bit
+
+  size_t pos = 0;
+  if (maxlen < 6)
+    return 0;
+  memcpy(out, sensor_id, 6);
+  pos += 6;
+
+  if (maxlen < pos + 1)
+    return 0;
+  uint8_t ctrl = (uint8_t)((param_cnt & 0x0F) << 4); // DataLen & Frag=0
+  ctrl |= PKT_MONITOR_DATA;                          // PacketType=000
+  out[pos++] = ctrl;
+
+  for (uint8_t i = 0; i < param_cnt; ++i) {
+    size_t used = proto_encode_param(&out[pos], maxlen - pos, &params[i]);
+    if (!used)
+      return 0;
+    pos += used;
+  }
+
+  if (maxlen < pos + 2)
+    return 0;
+  uint16_t crc = crc16_modbus(out, pos);
+  out[pos++] = (uint8_t)(crc & 0xFF);
+  out[pos++] = (uint8_t)((crc >> 8) & 0xFF);
+
+  return pos;
+}
+
 // ---- 工具：从控制字节拆位（规范：DataLen/FragInd/PacketType） ----
 static inline uint8_t _get_param_count(uint8_t ctrl) {
   return (ctrl >> 4) & 0x0F;
