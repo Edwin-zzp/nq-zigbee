@@ -8,6 +8,7 @@
 const uint8_t ZM32_MAC_LOCAL_EXEC[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE};
 const uint8_t ZM32_MAC_COORDINATOR[8] = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
 
+#define ZM32_PROTOCOL_TYPE 0x0004u
 #define ZM32_MAX_FRAME 256u
 #define ZM32_FRAME_MAX_TOTAL                                                   \
   (3u + 1u + 8u + 2u + 2u + ZM32_FRAME_TX_MAX_PAYLOAD + 1u + 1u)
@@ -305,6 +306,85 @@ bool zm32_cmd_set_receive_mode(const uint8_t mac[8], uint8_t mode,
   if (status_out)
     *status_out = resp[12];
   return true;
+}
+
+static bool zm32_parse_dev_info(const uint8_t *dev_info, uint16_t len,
+                                zm32_dev_info_t *out) {
+  if (!dev_info || len < 68u || !out)
+    return false;
+
+  memset(out, 0, sizeof(*out));
+  out->channel = dev_info[33];
+  out->pan_id = (uint16_t)((dev_info[34] << 8) | dev_info[35]);
+  out->net_addr = (uint16_t)((dev_info[36] << 8) | dev_info[37]);
+  memcpy(out->mac, &dev_info[38], 8u);
+  out->recv_mode = dev_info[56];
+  out->power_level = dev_info[57];
+  return true;
+}
+
+bool zm32_cmd_read_local_info(zm32_dev_info_t *info) {
+  if (!info)
+    return false;
+
+  uint8_t resp[96];
+  uint16_t resp_len = sizeof(resp);
+  if (!zm32_cmd_perm_exchange(0xD1u, NULL, 0, resp, &resp_len, 78u, false,
+                              ZM32_CMD_DEFAULT_TIMEOUT_MS)) {
+    printf("[ZM32] read_local_info timeout\r\n");
+    return false;
+  }
+  if (resp_len < 78u)
+    return false;
+  if (resp[0] != 0xABu || resp[1] != 0xBCu || resp[2] != 0xCDu)
+    return false;
+  if (resp[3] != 0xD1u)
+    return false;
+  if (resp[resp_len - 1] != 0xAAu)
+    return false;
+
+  const uint8_t *dev_info = &resp[4];
+  return zm32_parse_dev_info(dev_info, 68u, info);
+}
+
+bool zm32_cmd_write_pan_id(const uint8_t mac[8], uint16_t pan_id,
+                           uint8_t *status_out) {
+  if (!mac)
+    return false;
+
+  uint8_t payload[13];
+  memcpy(payload, mac, 8u);
+  payload[8] = 0x01u; // write
+  payload[9] = (uint8_t)((pan_id >> 8) & 0xFFu);
+  payload[10] = (uint8_t)(pan_id & 0xFFu);
+  payload[11] = 0x00u;
+  payload[12] = 0x00u;
+
+  uint8_t resp[20];
+  uint16_t resp_len = sizeof(resp);
+  if (!zm32_cmd_perm_exchange(0x41u, payload, sizeof(payload), resp, &resp_len,
+                              18u, true, ZM32_CMD_DEFAULT_TIMEOUT_MS)) {
+    printf("[ZM32] write_pan_id timeout\r\n");
+    return false;
+  }
+  if (resp_len < 18u)
+    return false;
+  if (status_out)
+    *status_out = resp[16];
+  return true;
+}
+
+bool zm32_cmd_reset_module(const uint8_t mac[8]) {
+  if (!mac)
+    return false;
+
+  uint8_t payload[10];
+  memcpy(payload, mac, 8u);
+  payload[8] = (uint8_t)((ZM32_PROTOCOL_TYPE >> 8) & 0xFFu);
+  payload[9] = (uint8_t)(ZM32_PROTOCOL_TYPE & 0xFFu);
+
+  return zm32_cmd_perm_exchange(0x59u, payload, sizeof(payload), NULL, NULL,
+                                0u, false, ZM32_CMD_DEFAULT_TIMEOUT_MS);
 }
 
 bool zm32_frame_build(const zm32_frame_tx_t *tx, uint8_t *out,

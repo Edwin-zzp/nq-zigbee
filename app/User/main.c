@@ -33,6 +33,9 @@
 /* Global define */
 /* ====== 版本号（随意改） ====== */
 #define APP_VERSION "v1.0.0"
+#define REPORT_ERROR_RECOVERY_THRESHOLD 5u
+#define ZM32_REJOIN_DELAY_MS 2000u
+#define ZM32_POST_RESTORE_DELAY_MS 500u
 
 /* Global Variable */
 
@@ -44,6 +47,10 @@ device_runtime_t g_dev_rt;
 
 // 本机 SensorID（规范里的 SensorID），这里写死一份示例值，后面按实际烧录ID改
 static uint8_t g_sensor_id[6] = {0x01, 0x23, 0x45, 0x67, 0x89, 0xAB};
+static zm32_dev_info_t g_zm32_info;
+static bool g_zm32_info_valid = false;
+static uint32_t g_last_recovery_err_mark = 0;
+static bool g_recovery_in_progress = false;
 
 static void print_mac_line(const char *prefix, const uint8_t mac[8]) {
   if (!prefix)
@@ -94,6 +101,99 @@ static void configure_zm32_defaults(void) {
   }
 
   zm32_cmd_flush_rx();
+}
+
+static bool fetch_zm32_info(void) {
+  zm32_dev_info_t info;
+  if (!zm32_cmd_read_local_info(&info)) {
+    printf("[ZM32] read dev info failed\r\n");
+    return false;
+  }
+
+  g_zm32_info = info;
+  g_zm32_info_valid = true;
+
+  printf("[ZM32] PAN=0x%04X channel=%u net=0x%04X\r\n", info.pan_id,
+         info.channel, info.net_addr);
+  print_mac_line("[ZM32] MAC=", info.mac);
+  return true;
+}
+
+static bool zm32_apply_pan_and_reset(uint16_t pan_id, const char *tag) {
+  if (!g_zm32_info_valid)
+    return false;
+
+  uint8_t status = 0xFFu;
+  if (!zm32_cmd_write_pan_id(g_zm32_info.mac, pan_id, &status)) {
+    printf("%s write PAN command failed\r\n", tag ? tag : "[ZM32]");
+    return false;
+  }
+  if (status != ZM32_STATUS_SUCCESS) {
+    printf("%s write PAN status=0x%02X\r\n", tag ? tag : "[ZM32]", status);
+    return false;
+  }
+
+  printf("%s set PAN=0x%04X\r\n", tag ? tag : "[ZM32]", pan_id);
+
+  if (!zm32_cmd_reset_module(g_zm32_info.mac)) {
+    printf("%s reset command failed\r\n", tag ? tag : "[ZM32]");
+    return false;
+  }
+
+  printf("%s reset issued\r\n", tag ? tag : "[ZM32]");
+  return true;
+}
+
+static void perform_zm32_recovery(void) {
+  if (g_recovery_in_progress)
+    return;
+
+  g_recovery_in_progress = true;
+
+  if (!g_zm32_info_valid && !fetch_zm32_info()) {
+    printf("[RECOVERY] no device info available\r\n");
+    g_recovery_in_progress = false;
+    return;
+  }
+
+  printf("[RECOVERY] monitor ack errors=%lu -> rejoin cycle\r\n",
+         (unsigned long)report_manager_get_error_count());
+
+  uint16_t restore_pan = g_zm32_info.pan_id;
+  bool ok = zm32_apply_pan_and_reset(0xFFFFu, "[RECOVERY]");
+  if (ok) {
+    Delay_Ms(ZM32_REJOIN_DELAY_MS);
+    ok = zm32_apply_pan_and_reset(restore_pan, "[RECOVERY]");
+  }
+
+  if (ok) {
+    Delay_Ms(ZM32_POST_RESTORE_DELAY_MS);
+    configure_zm32_defaults();
+    Delay_Ms(20);
+    if (!fetch_zm32_info()) {
+      printf("[RECOVERY] refresh dev info failed\r\n");
+      g_zm32_info_valid = false;
+    }
+  } else {
+    printf("[RECOVERY] cycle aborted\r\n");
+  }
+
+  report_manager_reset_errors();
+  g_last_recovery_err_mark = 0;
+  g_recovery_in_progress = false;
+}
+
+static void handle_report_errors(void) {
+  uint32_t err = report_manager_get_error_count();
+  if (err < REPORT_ERROR_RECOVERY_THRESHOLD)
+    return;
+  if (g_recovery_in_progress)
+    return;
+  if (err == g_last_recovery_err_mark)
+    return;
+
+  g_last_recovery_err_mark = err;
+  perform_zm32_recovery();
 }
 
 static void send_control_status_ack(uint8_t status) {
@@ -696,6 +796,7 @@ int main(void) {
   // printf("\r\n[BOOT] USART2 DMA+IDLE ready. Send data to see chunks...\r\n");
 
   configure_zm32_defaults();
+  fetch_zm32_info();
 
   led_init();
   // 协议解析上下文初始化
@@ -730,11 +831,12 @@ int main(void) {
   //  hw_usonic_set_freq(25000); // 设置超声波频率为 25kHz
 
   while (1) {
-     uint16_t n = usart2_pull_chunk(g_rx_chunk, sizeof(g_rx_chunk));
-     if (n) {
-       // 喂给解析器（内部可一次解析多帧）
-       proto_feed(&g_proto, g_rx_chunk, n);
-     }
-     report_manager_process();
+    uint16_t n = usart2_pull_chunk(g_rx_chunk, sizeof(g_rx_chunk));
+    if (n) {
+      // 喂给解析器（内部可一次解析多帧）
+      proto_feed(&g_proto, g_rx_chunk, n);
+    }
+    report_manager_process();
+    handle_report_errors();
   }
 }

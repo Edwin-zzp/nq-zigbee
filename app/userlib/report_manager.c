@@ -186,3 +186,7 @@ void report_manager_on_monitor_ack(const proto_frame_t *frame) {
 uint32_t report_manager_get_error_count(void) {
   return s_report_ctx.error_count;
 }
+
+void report_manager_reset_errors(void) {
+  s_report_ctx.error_count = 0;
+}

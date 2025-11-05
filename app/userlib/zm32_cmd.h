@@ -52,6 +52,15 @@ extern const uint8_t ZM32_MAC_COORDINATOR[8];
 void zm32_cmd_init(void);
 void zm32_cmd_flush_rx(void);
 
+typedef struct {
+  uint8_t mac[8];
+  uint16_t pan_id;
+  uint16_t net_addr;
+  uint8_t channel;
+  uint8_t recv_mode;
+  uint8_t power_level;
+} zm32_dev_info_t;
+
 bool zm32_cmd_temp_exchange(uint8_t cmd, const uint8_t *payload,
                             uint16_t payload_len, uint8_t *resp_buf,
                             uint16_t *resp_len, uint16_t min_resp_len,
@@ -67,6 +76,10 @@ bool zm32_cmd_set_target_mac(const uint8_t mac[8], uint8_t *status_out,
                              uint8_t ack_mac_out[8]);
 bool zm32_cmd_set_receive_mode(const uint8_t mac[8], uint8_t mode,
                                uint8_t *status_out, uint8_t ack_mac_out[8]);
+bool zm32_cmd_read_local_info(zm32_dev_info_t *info);
+bool zm32_cmd_write_pan_id(const uint8_t mac[8], uint16_t pan_id,
+                           uint8_t *status_out);
+bool zm32_cmd_reset_module(const uint8_t mac[8]);
 
 /* Frame transport helpers (Table 14.213/14.215/14.217/14.219) */
 #define ZM32_FRAME_HEADER0 0xADu

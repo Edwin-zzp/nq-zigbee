@@ -14,5 +14,6 @@ void report_manager_on_monitor_ack(const proto_frame_t *frame);
 void report_manager_request_immediate(void);
 void report_manager_set_sensor_id(const uint8_t sensor_id[6]);
 uint32_t report_manager_get_error_count(void);
+void report_manager_reset_errors(void);
 
 #endif
