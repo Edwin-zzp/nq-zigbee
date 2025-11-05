@@ -142,6 +142,54 @@ size_t proto_build_control_id_ack(const uint8_t sensor_id[6],
   return pos;
 }
 
+size_t proto_build_control_param_ack(const uint8_t sensor_id[6],
+                                     uint8_t ctrl_type,
+                                     uint8_t req_set,
+                                     const proto_param_tx_t *params,
+                                     uint8_t param_cnt,
+                                     uint8_t *out,
+                                     size_t maxlen) {
+  if (!sensor_id || !out)
+    return 0;
+  if (param_cnt > 0x0Fu)
+    return 0;
+  if (!params && param_cnt > 0)
+    return 0;
+
+  size_t pos = 0;
+  if (maxlen < 6)
+    return 0;
+  memcpy(out, sensor_id, 6);
+  pos += 6;
+
+  if (maxlen < pos + 1)
+    return 0;
+  uint8_t ctrl = (uint8_t)((param_cnt & 0x0Fu) << 4);
+  ctrl |= PKT_CONTROL_ACK;
+  out[pos++] = ctrl;
+
+  if (maxlen < pos + 1)
+    return 0;
+  uint8_t head = (uint8_t)((ctrl_type << 1) & 0xFEu);
+  head |= (req_set & 0x01u);
+  out[pos++] = head;
+
+  for (uint8_t i = 0; i < param_cnt; ++i) {
+    size_t used = proto_encode_param(&out[pos], maxlen - pos, &params[i]);
+    if (!used)
+      return 0;
+    pos += used;
+  }
+
+  if (maxlen < pos + 2)
+    return 0;
+  uint16_t crc = crc16_modbus(out, pos);
+  out[pos++] = (uint8_t)(crc & 0xFF);
+  out[pos++] = (uint8_t)((crc >> 8) & 0xFF);
+
+  return pos;
+}
+
 // ---- 工具：从控制字节拆位（规范：DataLen/FragInd/PacketType） ----
 static inline uint8_t _get_param_count(uint8_t ctrl) {
   return (ctrl >> 4) & 0x0F;
@@ -223,7 +271,10 @@ static uint16_t try_parse_one(proto_ctx_t *ctx, const uint8_t *buf,
   // Data 区按 PacketType 解析
   if (f->hdr.pkt_type ==
       PKT_MONITOR_DATA) { // 000：监测上报 → ParameterList(N项)
-    for (uint8_t i = 0; i < f->hdr.param_count; i++) {
+    uint8_t expect = f->hdr.param_count;
+    if (expect == 0x0Fu)
+      expect = 0;
+    for (uint8_t i = 0; i < expect; i++) {
       if (f->param_cnt >= 16)
         return 0;
       uint16_t used = parse_one_param(&buf[pos], (uint16_t)(len - pos),
@@ -254,7 +305,10 @@ static uint16_t try_parse_one(proto_ctx_t *ctx, const uint8_t *buf,
         pos += 6;
       }
     } else { // 参数/输出：ParameterList（N项，可为0）
-      for (uint8_t i = 0; i < f->hdr.param_count; i++) {
+      uint8_t expect = f->hdr.param_count;
+      if (expect == 0x0Fu)
+        expect = 0;
+      for (uint8_t i = 0; i < expect; i++) {
         if (f->param_cnt >= 16)
           return 0;
         uint16_t used = parse_one_param(&buf[pos], (uint16_t)(len - pos),
@@ -268,7 +322,7 @@ static uint16_t try_parse_one(proto_ctx_t *ctx, const uint8_t *buf,
   } else if (f->hdr.pkt_type == PKT_CONTROL_ACK) { // 101：控制响应
     // ① 仅状态：CommandStatus(1B)
     // ② ID 回应：CtrlHead(1B) + SensorID(6B)
-    // ③ 参数/输出回应：ParameterList（N项，不带 CtrlHead 回显）
+    // ③ 参数/输出回应：可选 CtrlHead + ParameterList（N 项）
     uint16_t rem_no_crc = (uint16_t)(len - pos - 2);
     if ((int)rem_no_crc == 1) {
       f->has_cmd_status = 1;
@@ -285,7 +339,18 @@ static uint16_t try_parse_one(proto_ctx_t *ctx, const uint8_t *buf,
         pos += 6;
         f->has_id_payload = 1;
       } else {
-        for (uint8_t i = 0; i < f->hdr.param_count; i++) {
+        if (rem_no_crc >= 1) {
+          if ((mt == CTRL_PARAM_QS) || (mt == CTRL_OUTPUT_QS)) {
+            f->has_ctrl = 1;
+            f->ctrl_type = mt;
+            f->req_set = (maybe_head & 0x01);
+            pos++;
+          }
+        }
+        uint8_t expect = f->hdr.param_count;
+        if (expect == 0x0Fu)
+          expect = 0;
+        for (uint8_t i = 0; i < expect; i++) {
           if (f->param_cnt >= 16)
             return 0;
           uint16_t used = parse_one_param(&buf[pos], (uint16_t)(len - pos),

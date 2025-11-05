@@ -67,6 +67,108 @@ static void send_control_id_ack(uint8_t req_set, const uint8_t id_payload[6]) {
          id_payload[4], id_payload[5]);
 }
 
+static void write_le16(uint8_t out[2], uint16_t value) {
+  out[0] = (uint8_t)(value & 0xFFu);
+  out[1] = (uint8_t)((value >> 8) & 0xFFu);
+}
+
+static void send_param_query_ack(uint8_t req_set, const proto_frame_t *req) {
+  uint8_t upload_payload[2];
+  write_le16(upload_payload, g_dev_cfg.dt_upload_period);
+
+  dev_out_mode_t mode[DEV_CH_COUNT];
+  device_get_output_mode(&g_dev_cfg, mode);
+  uint8_t output_payload[DEV_CH_COUNT];
+  for (uint8_t i = 0; i < DEV_CH_COUNT; ++i)
+    output_payload[i] = (uint8_t)mode[i];
+
+  uint8_t work_payload[2];
+  write_le16(work_payload, device_get_work_time(&g_dev_cfg));
+
+  uint8_t stop_payload[2];
+  write_le16(stop_payload, device_get_stop_time(&g_dev_cfg));
+
+  uint8_t freq_payload[2];
+  write_le16(freq_payload, device_get_us_freq(&g_dev_cfg));
+
+  proto_param_tx_t catalog[] = {
+      {.dtype = DT_UPLOAD_PERIOD,
+       .lflag = 0x01,
+       .len = sizeof(upload_payload),
+       .data = upload_payload},
+      {.dtype = DT_OUTPUT_CTRL,
+       .lflag = 0x01,
+       .len = sizeof(output_payload),
+       .data = output_payload},
+      {.dtype = DT_T_ON_SET,
+       .lflag = 0x01,
+       .len = sizeof(work_payload),
+       .data = work_payload},
+      {.dtype = DT_T_OFF_SET,
+       .lflag = 0x01,
+       .len = sizeof(stop_payload),
+       .data = stop_payload},
+      {.dtype = DT_FREQ_SET,
+       .lflag = 0x01,
+       .len = sizeof(freq_payload),
+       .data = freq_payload},
+  };
+
+  proto_param_tx_t selected[sizeof(catalog) / sizeof(catalog[0])];
+  uint8_t selected_cnt = 0;
+
+  bool query_all = true;
+  if (req) {
+    if ((req->hdr.param_count != 0x0Fu) && req->param_cnt > 0)
+      query_all = false;
+  }
+
+  const uint8_t catalog_count =
+      (uint8_t)(sizeof(catalog) / sizeof(catalog[0]));
+
+  if (query_all) {
+    for (uint8_t i = 0; i < catalog_count; ++i)
+      selected[selected_cnt++] = catalog[i];
+  } else {
+    for (uint8_t i = 0; i < req->param_cnt; ++i) {
+      uint16_t dtype = req->params[i].dtype;
+      for (uint8_t j = 0; j < catalog_count; ++j) {
+        if (catalog[j].dtype == dtype) {
+          bool already_added = false;
+          for (uint8_t k = 0; k < selected_cnt; ++k) {
+            if (selected[k].dtype == dtype) {
+              already_added = true;
+              break;
+            }
+          }
+          if (!already_added && selected_cnt < catalog_count)
+            selected[selected_cnt++] = catalog[j];
+          break;
+        }
+      }
+    }
+  }
+
+  if (selected_cnt == 0) {
+    printf("[CTRL-PARAM] no known params requested\r\n");
+    send_control_status_ack(0x00);
+    return;
+  }
+
+  uint8_t frame[160];
+  size_t frame_len =
+      proto_build_control_param_ack(g_sensor_id, CTRL_PARAM_QS, req_set,
+                                    selected,
+                                    selected_cnt, frame, sizeof(frame));
+  if (!frame_len) {
+    printf("[CTRL-PARAM] build ack failed\r\n");
+    return;
+  }
+
+  usart2_tx_write_blocking(frame, (uint16_t)frame_len);
+  printf("[CTRL-ACK-PARAM] cnt=%u rs=%u\r\n", selected_cnt, req_set);
+}
+
 static void apply_sensor_id(const uint8_t new_id[6]) {
   if (!new_id)
     return;
@@ -148,6 +250,13 @@ static void on_control(proto_ctx_t *ctx, const proto_frame_t *f) {
       }
       apply_sensor_id(f->id_payload);
       send_control_id_ack(f->req_set, g_sensor_id);
+    }
+  } else if (f->ctrl_type == CTRL_PARAM_QS) {
+    if (f->req_set == 0) {
+      send_param_query_ack(f->req_set, f);
+    } else {
+      printf("[CTRL-PARAM] set not supported\r\n");
+      send_control_status_ack(0x00);
     }
   }
 }
