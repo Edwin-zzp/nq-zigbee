@@ -51,6 +51,14 @@ typedef struct {
     uint8_t  val[64]; // 规范：Data（内容长度见 len）
 } proto_param_t;
 
+// ParameterList 发送端的描述结构
+typedef struct {
+    uint16_t dtype;       // ↔ DataType(14b)
+    uint8_t  lflag;       // ↔ LengthFlag(2b)
+    uint32_t len;         // ↔ length(xB)
+    const uint8_t *data;  // ↔ Data 指针
+} proto_param_tx_t;
+
 // ---------------- SensorID（规范：SensorID，6 字节） ----------------
 // 此结构仅保留原始 6B；若需拆分厂商/版本/序列，可在业务层解析
 // ⚠ 本机的 SensorID 由 proto_set_local_id() 进行配置，用于帧过滤
@@ -124,6 +132,31 @@ typedef struct proto_ctx_s{
 void proto_init(proto_ctx_t *ctx);
 void proto_set_local_id(proto_ctx_t *ctx, const uint8_t id6[6]); // ★ 设置本机 SensorID 的位置
 void proto_feed(proto_ctx_t *ctx, const uint8_t *data, uint16_t len);
+
+// 发送端工具：编码一项 ParameterList / 构造 000 监测数据报文
+size_t proto_encode_param(uint8_t *out, size_t maxlen, const proto_param_tx_t *param);
+size_t proto_build_monitor_frame(const uint8_t sensor_id[6],
+                                 const proto_param_tx_t *params,
+                                 uint8_t param_cnt,
+                                 uint8_t *out,
+                                 size_t maxlen);
+size_t proto_build_control_status_ack(const uint8_t sensor_id[6],
+                                      uint8_t status,
+                                      uint8_t *out,
+                                      size_t maxlen);
+size_t proto_build_control_id_ack(const uint8_t sensor_id[6],
+                                  uint8_t ctrl_type,
+                                  uint8_t req_set,
+                                  const uint8_t id_payload[6],
+                                  uint8_t *out,
+                                  size_t maxlen);
+size_t proto_build_control_param_ack(const uint8_t sensor_id[6],
+                                     uint8_t ctrl_type,
+                                     uint8_t req_set,
+                                     const proto_param_tx_t *params,
+                                     uint8_t param_cnt,
+                                     uint8_t *out,
+                                     size_t maxlen);
 
 #ifdef __cplusplus
 }
